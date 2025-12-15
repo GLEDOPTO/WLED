@@ -618,7 +618,7 @@ function populatePresets(fromls)
 
 function parseInfo(i) {
 	lastinfo = i;
-	var name = i.name;
+	var name = "WLED-Gledopto";
 	gId('namelabel').innerHTML = name;
 	if (!name.match(/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f\u3131-\uD79D]/))
 		gId('namelabel').style.transform = "rotate(180deg)"; // rotate if no CJK characters
