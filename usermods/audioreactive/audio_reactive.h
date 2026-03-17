@@ -54,6 +54,10 @@
 
 #define MAX_PALETTES 3
 
+#ifndef SOUND_AGC
+#define SOUND_AGC 0
+#endif
+
 static volatile bool disableSoundProcessing = false;      // if true, sound processing (FFT, filters, AGC) will be suspended. "volatile" as its shared between tasks.
 static uint8_t audioSyncEnabled = 0;          // bit field: bit 0 - send, bit 1 - receive (config value)
 static bool udpSyncConnected = false;         // UDP connection status -> true if connected to multicast group
@@ -66,7 +70,7 @@ static float    micDataReal = 0.0f;             // MicIn data with full 24bit re
 static float    multAgc = 1.0f;                 // sample * multAgc = sampleAgc. Our AGC multiplier
 static float    sampleAvg = 0.0f;               // Smoothed Average sample - sampleAvg < 1 means "quiet" (simple noise gate)
 static float    sampleAgc = 0.0f;               // Smoothed AGC sample
-static uint8_t  soundAgc = 0;                   // Automagic gain control: 0 - none, 1 - normal, 2 - vivid, 3 - lazy (config value)
+static uint8_t  soundAgc = SOUND_AGC;                   // Automagic gain control: 0 - none, 1 - normal, 2 - vivid, 3 - lazy (config value)
 #endif
 //static float    volumeSmth = 0.0f;              // either sampleAvg or sampleAgc depending on soundAgc; smoothed sample
 static float FFT_MajorPeak = 1.0f;              // FFT: strongest (peak) frequency

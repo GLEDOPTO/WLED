@@ -579,19 +579,26 @@
     #define DEFAULT_LED_PIN 1
     #warning "Compiling with DMX. The default LED pin has been changed to pin 1."
   #else
-    #define DEFAULT_LED_PIN 2    // GPIO2 (D4) on Wemos D1 mini compatible boards, safe to use on any board
+    #ifndef DEFAULT_LED_PIN
+      #define DEFAULT_LED_PIN 2    // GPIO2 (D4) on Wemos D1 mini compatible boards, safe to use on any board
+    #endif
   #endif
 #else
   #if defined(WLED_USE_ETHERNET)
     #define DEFAULT_LED_PIN 4    // GPIO4 seems to be a "safe bet" for all known ethernet boards (issue #5155)
     //#warning "Compiling with Ethernet support. The default LED pin has been changed to pin 4."
   #else
-    #define DEFAULT_LED_PIN 16   // aligns with GPIO2 (D4) on Wemos D1 mini32 compatible boards (if it is unusable it will be reassigned in WS2812FX::finalizeInit())
+    #ifndef DEFAULT_LED_PIN
+      #define DEFAULT_LED_PIN 16   // aligns with GPIO2 (D4) on Wemos D1 mini32 compatible boards (if it is unusable it will be reassigned in WS2812FX::finalizeInit())
+    #endif
   #endif
 #endif
-#define DEFAULT_LED_TYPE TYPE_WS2812_RGB
-#define DEFAULT_LED_COUNT 30
-
+#ifndef DEFAULT_LED_TYPE
+  #define DEFAULT_LED_TYPE TYPE_WS2812_RGB
+#endif
+#ifndef DEFAULT_LED_COUNT
+  #define DEFAULT_LED_COUNT 30
+#endif
 #define INTERFACE_UPDATE_COOLDOWN 1000 // time in ms to wait between websockets, alexa, and MQTT updates
 
 #define PIN_RETRY_COOLDOWN   3000 // time in ms after an incorrect attempt PIN and OTA pass will be rejected even if correct
