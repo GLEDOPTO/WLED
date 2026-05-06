@@ -44,7 +44,9 @@ constexpr size_t  WLED_MAX_USERMOD_PALETTES     = WLED_USERMOD_PALETTE_ID_BASE -
 
 //Defaults
 #define DEFAULT_CLIENT_SSID "Your_Network"
+#ifndef DEFAULT_AP_SSID
 #define DEFAULT_AP_SSID     WLED_BRAND "-AP"
+#endif
 #define DEFAULT_AP_PASS     "wled1234"
 #define DEFAULT_OTA_PASS    "wledota"
 #define DEFAULT_MDNS_NAME   "x"
