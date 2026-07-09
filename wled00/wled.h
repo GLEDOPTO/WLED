@@ -394,8 +394,11 @@ WLED_GLOBAL uint8_t txPower _INIT(WIFI_POWER_19_5dBm);
 
 // LED CONFIG
 WLED_GLOBAL bool turnOnAtBoot _INIT(true);                // turn on LEDs at power-up
+#ifdef WLED_BOOT_PRESET
+WLED_GLOBAL byte bootPreset   _INIT(WLED_BOOT_PRESET);                   // save preset to load after power-up
+#else
 WLED_GLOBAL byte bootPreset   _INIT(0);                   // save preset to load after power-up
-
+#endif
 //if true, a segment per bus will be created on boot and LED settings save
 //if false, only one segment spanning the total LEDs is created,
 //but not on LED settings save if there is more than one segment currently

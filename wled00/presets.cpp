@@ -98,7 +98,72 @@ bool getPresetName(byte index, String& name)
   releaseJSONBufferLock();
   return presetExists;
 }
+#ifdef WLED_BOOT_PRESET
+void initPresetsFile()
+{
+    char fileName[33];
+    strncpy_P(fileName, getPresetsFileName(), 32);
+    fileName[32] = 0;
 
+    if (WLED_FS.exists(fileName))
+    {
+        File f = WLED_FS.open(fileName, "r");
+        if (f && f.size() > 100)
+        {
+            f.close();
+            return;
+        }
+        if (f)
+            f.close();
+    }
+    const char presetJson[] =
+        "{"
+        "\"0\":{},"
+        "\"1\":{"
+        "\"on\":true,"
+        "\"bri\":128,"
+        "\"transition\":7,"
+        "\"mainseg\":0,"
+        "\"n\":\"Default State\","
+        "\"seg\":["
+        "{"
+        "\"id\":0,"
+        "\"start\":0,"
+        "\"stop\":1,"
+        "\"on\":true,"
+        "\"bri\":128,"
+        "\"cct\":117,"
+        "\"col\":[[255,255,255,255],[0,0,0,0],[0,0,0,0]],"
+        "\"fx\":0,"
+        "\"sx\":128,"
+        "\"ix\":128,"
+        "\"pal\":0"
+        "},"
+        "{"
+        "\"id\":1,"
+        "\"start\":1,"
+        "\"stop\":31,"
+        "\"on\":true,"
+        "\"bri\":128,"
+        "\"col\":[[255,165,0],[0,0,0,0],[0,0,0,0]],"
+        "\"fx\":0,"
+        "\"sx\":128,"
+        "\"ix\":128,"
+        "\"pal\":0"
+        "}"
+        "]"
+        "}"
+        "}";
+    File f = WLED_FS.open(fileName, "w");
+    if (!f)
+    {
+        errorFlag = ERR_FS_GENERAL;
+        return;
+    }
+    f.print(presetJson);
+    f.close();
+}
+#else
 void initPresetsFile()
 {
   char fileName[33]; strncpy_P(fileName, getPresetsFileName(), 32); fileName[32] = 0; //use PROGMEM safe copy as FS.open() does not
@@ -115,6 +180,7 @@ void initPresetsFile()
   serializeJson(doc, f);
   f.close();
 }
+#endif
 
 bool applyPresetFromPlaylist(byte index)
 {
