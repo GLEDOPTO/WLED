@@ -448,6 +448,16 @@ public:
     }
 };
 
+/* I2C retry mechanism (shared by ES8388 / ES8390)
+   Retries automatically on read/write failure to improve reliability
+   when the bus is disturbed. Can be overridden at build time, e.g. -DAR_I2C_RETRIES=5 */
+#ifndef AR_I2C_RETRIES
+#define AR_I2C_RETRIES 3          // max attempts (including the first)
+#endif
+#ifndef AR_I2C_RETRY_DELAY_MS
+#define AR_I2C_RETRY_DELAY_MS 2   // wait before each retry (ms)
+#endif
+
 /* ES8388 Sound Module
    This is an I2S sound processing unit that requires initialization over
    I2C before I2S data can be received. 
@@ -564,6 +574,223 @@ class ES8388Source : public I2SSource {
     }
 
 };
+
+#ifdef SR_ES8390
+#ifndef ES8390_ADDR
+#define ES8390_ADDR 0x10   // default address
+#endif
+
+/* ES8390 - Line-in via LIN2 / RIN2 (also supports LIN1/RIN1 for mic)
+   ESP32 acts as I2S master, ES8390 as slave (MCLK / SCLK / LRCK all provided by ESP32).
+   Ref 1: https://elixir.bootlin.com/linux/v7.1.1/source/sound/soc/codecs/es8389.c
+   Ref 2: https://github.com/Cohen0415/es8389-driver/tree/main */
+class ES8390Source : public I2SSource {
+  private:
+    bool _differentialInput;
+
+  protected:
+    void _es8390I2cBegin() {
+      Wire.setClock(100000);
+    }
+
+    bool _es8390I2cWrite(uint8_t reg, uint8_t val) {
+      for (uint8_t attempt = 1; attempt <= AR_I2C_RETRIES; attempt++) {
+        Wire.beginTransmission(ES8390_ADDR);
+        Wire.write((uint8_t)reg);
+        Wire.write((uint8_t)val);
+        uint8_t i2cErr = Wire.endTransmission();
+        if (i2cErr == 0) {
+          if (attempt > 1) DEBUGSR_PRINTF("AR: ES8390 I2C write OK on retry %d (addr=0x%02X, reg=0x%02X, val=0x%02X)\n", attempt, ES8390_ADDR, reg, val);
+          return true;
+        }
+        DEBUGSR_PRINTF("AR: ES8390 I2C write failed! error=%d attempt %d/%d (addr=0x%02X, reg=0x%02X, val=0x%02X)\n", i2cErr, attempt, AR_I2C_RETRIES, ES8390_ADDR, reg, val);
+        if (attempt < AR_I2C_RETRIES) delay(AR_I2C_RETRY_DELAY_MS);
+      }
+      return false;
+    }
+
+    uint8_t _es8390I2cRead(uint8_t reg) {
+      for (uint8_t attempt = 1; attempt <= AR_I2C_RETRIES; attempt++) {
+        Wire.beginTransmission(ES8390_ADDR);
+        Wire.write((uint8_t)reg);
+        if (Wire.endTransmission(false) != 0) {
+          DEBUGSR_PRINTF("AR: ES8390 I2C read (addr phase) failed! attempt %d/%d (reg=0x%02X)\n", attempt, AR_I2C_RETRIES, reg);
+          if (attempt < AR_I2C_RETRIES) { delay(AR_I2C_RETRY_DELAY_MS); continue; }
+          return 0;
+        }
+        if (Wire.requestFrom((int)ES8390_ADDR, 1) != 1 || !Wire.available()) {
+          DEBUGSR_PRINTF("AR: ES8390 I2C read (data phase) failed! attempt %d/%d (reg=0x%02X)\n", attempt, AR_I2C_RETRIES, reg);
+          if (attempt < AR_I2C_RETRIES) { delay(AR_I2C_RETRY_DELAY_MS); continue; }
+          return 0;
+        }
+        return Wire.read();
+      }
+      return 0;
+    }
+
+    bool _es8390Probe() {
+      DEBUGSR_PRINTLN(F("AR: Probing ES8390 on I2C bus..."));
+      uint8_t id1 = _es8390I2cRead(0xFD);
+      uint8_t id2 = _es8390I2cRead(0xFE);
+      DEBUGSR_PRINTF("AR: ES8390 chip id: 0x%02X 0x%02X (expect 0x83 0x89)\n", id1, id2);
+      if (id1 == 0x83 && id2 == 0x89) {
+        DEBUGSR_PRINTF("AR: ES8390 found at address 0x%02X!\n", ES8390_ADDR);
+        return true;
+      } else {
+        DEBUGSR_PRINTF("AR: ES8390 NOT found at address 0x%02X!\n", ES8390_ADDR);
+        DEBUGSR_PRINTLN(F("AR: Check wiring and I2C pull-up resistors!"));
+        return false;
+      }
+    }
+
+    void _es8390InitAdc() {
+
+      _es8390I2cWrite(0xF3, 0x00);   // ISO_CTL unlock
+      _es8390I2cWrite(0x00, 0x7E);   // RESET
+      _es8390I2cWrite(0xF3, 0x38);   // ISO_CTL = 0x38
+
+      _es8390I2cWrite(0x24, 0x64);   // ADC_HPF1
+      _es8390I2cWrite(0x25, 0x04);   // ADC_HPF2
+      _es8390I2cWrite(0x45, 0x03);   // DAC_INV
+
+      _es8390I2cWrite(0x60, 0x2A);   // VMID
+      _es8390I2cWrite(0x61, 0xC9);   // ANA_CTL1
+      _es8390I2cWrite(0x62, 0x4F);   // ANA_VSEL
+      _es8390I2cWrite(0x63, 0x06);   // ANA_CTL2
+      _es8390I2cWrite(0x6B, 0x00);   // LOW_POWER1
+      _es8390I2cWrite(0x6D, 0x16);   // DMIC_EN (fix: 0x6D not 0x23!)
+
+      _es8390I2cWrite(0x6E, 0xAA);   // PGA_SW
+      _es8390I2cWrite(0x6F, 0x66);   // MOD_SW1
+      _es8390I2cWrite(0x70, 0x99);   // MOD_SW2
+      _es8390I2cWrite(0x23, 0x00);   // ADC_MODE: AMIC, TDM off
+
+      _es8390I2cWrite(0x10, 0xC4);   // CSM_JUMP
+      _es8390I2cWrite(0x01, 0x08);   // MASTER_MODE (slave)
+      _es8390I2cWrite(0xF1, 0x00);   // CSM_STATE1
+
+      _es8390I2cWrite(0x12, 0x01);   // SYSTEM12
+      _es8390I2cWrite(0x13, 0x01);   // SYSTEM13
+      _es8390I2cWrite(0x14, 0x01);   // SYSTEM14
+      _es8390I2cWrite(0x15, 0x01);   // SYSTEM15
+      _es8390I2cWrite(0x16, 0x35);   // SYSTEM16
+      _es8390I2cWrite(0x17, 0x09);   // SYSTEM17
+      _es8390I2cWrite(0x18, 0x91);   // SYSTEM18
+      _es8390I2cWrite(0x19, 0x28);   // SYSTEM19
+      _es8390I2cWrite(0x1A, 0x01);   // SYSTEM1A
+      _es8390I2cWrite(0x1B, 0x01);   // SYSTEM1B
+      _es8390I2cWrite(0x1C, 0x11);   // SYSTEM1C
+
+      _es8390I2cWrite(0xF0, 0x13);   // CHIP_MISC
+      _es8390I2cWrite(0x02, 0x00);   // MASTER_CLK
+      _es8390I2cWrite(0x04, 0x00);   // CLK_DIV1
+      _es8390I2cWrite(0x05, 0x10);   // CLK_MUL
+      _es8390I2cWrite(0x06, 0x00);   // CLK_MUX1
+      _es8390I2cWrite(0x07, 0xC0);   // CLK_MUX2
+      _es8390I2cWrite(0x08, 0x00);   // CLK_CTL1
+      _es8390I2cWrite(0x09, 0xC0);   // CLK_CTL2
+      _es8390I2cWrite(0x0A, 0x80);   // CLK_CTL3
+      _es8390I2cWrite(0x0B, 0x04);   // SCLK_DIV
+      _es8390I2cWrite(0x0C, 0x01);   // LRCK_DIV1
+      _es8390I2cWrite(0x0D, 0x00);   // LRCK_DIV2
+      _es8390I2cWrite(0x0F, 0x00);   // OSC_CLK
+
+      _es8390I2cWrite(0x21, 0x1F);   // ADC_OSR
+      _es8390I2cWrite(0x22, 0x7F);   // ADC_DSP
+      _es8390I2cWrite(0x2F, 0xC0);   // ADC_MUTE: OSR volume on
+      _es8390I2cWrite(0x30, 0xF4);   // SYSTEM30
+      _es8390I2cWrite(0x41, 0x7F);   // DAC_DSM_OSR
+      _es8390I2cWrite(0x42, 0x7F);   // DAC_DSP_OSR
+      _es8390I2cWrite(0x43, 0x10);   // DAC_MISC
+      _es8390I2cWrite(0x49, 0x0F);   // DAC_RAMP
+      _es8390I2cWrite(0x4C, 0xC0);   // SYSTEM4C
+
+      _es8390I2cWrite(0x00, 0x00);   // RESET
+      _es8390I2cWrite(0x03, 0xC1);   // CLK_OFF1
+      _es8390I2cWrite(0x00, 0x01);   // RESET run state
+      _es8390I2cWrite(0x4D, 0x02);   // DAC_RESET
+
+      // 32-bit I2S word length, mute first
+      _es8390I2cWrite(0x20, 0x83);   // ADC: 32bit I2S + mute
+      _es8390I2cWrite(0x40, 0x83);   // DAC: 32bit I2S + mute
+
+      _es8390I2cWrite(0x26, 0xBF);   // OSR_VOL
+
+      // ===== official BIAS_ON: power up analog + CSM->Normal =====
+      _es8390I2cWrite(0x61, 0xD9);   // ANA_CTL1 power up
+      _es8390I2cWrite(0x64, 0x8F);   // ADC_EN
+      _es8390I2cWrite(0x10, 0xE4);   // CSM_JUMP -> Normal
+      _es8390I2cWrite(0x00, 0x01);   // RESET
+      _es8390I2cWrite(0x03, 0xC3);   // CLK_OFF1
+      delay(150);
+
+      // capture unmute
+      _es8390I2cWrite(0x24, 0x6A);   // ADC_HPF1 low nibble -> 0x0a
+      _es8390I2cWrite(0x25, 0x0A);   // ADC_HPF2 low nibble -> 0x0a
+      _es8390I2cWrite(0x20, 0x80);   // ADC unmute (keep 32bit)
+
+      // ===== ADC input gain (output bypasses ES8390, DAC side stays muted) =====
+      _es8390I2cWrite(0x72, 0x70);   // PGA1 gain
+      _es8390I2cWrite(0x73, 0x70);   // PGA2 gain
+    }
+
+  public:
+    ES8390Source(SRate_t sampleRate, int blockSize, float sampleScale = 1.0f,
+                 bool differentialInput = false) :
+      I2SSource(sampleRate, blockSize, sampleScale),
+      _differentialInput(differentialInput)
+    {
+      _config.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
+    }
+
+    void initialize(int8_t i2swsPin, int8_t i2ssdPin, int8_t i2sckPin, int8_t mclkPin) {
+      DEBUGSR_PRINTLN(F("ES8390Source:: initialize();"));
+      if ((i2sckPin < 0) || (mclkPin < 0)) {
+        DEBUGSR_PRINTF("\nAR: invalid I2S pin: SCK=%d, MCLK=%d\n", i2sckPin, mclkPin);
+        return;
+      }
+
+      _es8390I2cBegin();
+      delay(50);
+
+      I2SSource::initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+      if (!I2SSource::isInitialized()) {
+        DEBUGSR_PRINTLN(F("AR: I2S clock init failed, ES8390 init aborted."));
+        return;
+      }
+
+      delay(200);
+
+      if (!_es8390Probe()) {
+        DEBUGSR_PRINTLN(F("AR: ES8390 not detected after I2S clock started."));
+        I2SSource::deinitialize();
+        return;
+      }
+
+      DEBUGSR_PRINTLN(F("AR: Configuring ES8390 for Line-In..."));
+      _es8390InitAdc();
+
+      DEBUGSR_PRINTLN(F("ES8390Source:: initialize() completed."));
+    }
+
+    void deinitialize() {
+      I2SSource::deinitialize();
+    }
+
+    // public API
+    bool writeRegister(uint8_t reg, uint8_t val) {
+      return _es8390I2cWrite(reg, val);
+    }
+
+    uint8_t readRegister(uint8_t reg) {
+      return _es8390I2cRead(reg);
+    }
+
+    void setPgaGain(uint8_t channel, uint8_t val) {
+      _es8390I2cWrite(channel == 0 ? 0x72 : 0x73, val);
+    }
+};
+#endif
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 2, 0)
 #if !defined(SOC_I2S_SUPPORTS_ADC) && !defined(SOC_I2S_SUPPORTS_ADC_DAC)

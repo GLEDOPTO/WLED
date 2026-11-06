@@ -836,6 +836,13 @@ class AudioReactive : public Usermod {
     bool     addPalettes = false;
     int8_t   palettes = 0;
 
+#ifdef SR_ES8390
+    struct {
+      uint8_t pgaL  = 0x70;  // 0x72 PGA1 Gain Control
+      uint8_t pgaR  = 0x70;  // 0x73 PGA2 Gain Control
+    } es8390Cfg;
+#endif
+
     // variables  for UDP sound sync
     WiFiUDP fftUdp;               // UDP object for sound sync (from WiFi UDP, not Async UDP!) 
     unsigned long lastTime = 0;   // last time of running UDP Microphone Sync
@@ -1440,6 +1447,21 @@ class AudioReactive : public Usermod {
           delay(100);
           if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
           break;
+
+#ifdef SR_ES8390
+        case 7:
+          DEBUGSR_PRINTLN(F("AR: ES8390 Source"));
+          audioSource = new ES8390Source(SAMPLE_RATE, BLOCK_SIZE, 1.0f, false);
+          useMicFilter = false; // ES8390 is line-in, skip mic band-pass filter
+          delay(100);
+          if (audioSource) {
+            audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);
+            ES8390Source* es8390src = static_cast<ES8390Source*>(audioSource);
+            es8390src->setPgaGain(0, es8390Cfg.pgaL);
+            es8390src->setPgaGain(1, es8390Cfg.pgaR);
+          }
+          break;
+#endif
 
         #if  !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32S3)
         // ADC over I2S is only possible on "classic" ESP32
@@ -2050,6 +2072,12 @@ class AudioReactive : public Usermod {
       JsonObject sync = top.createNestedObject("sync");
       sync["port"] = audioSyncPort;
       sync["mode"] = audioSyncEnabled;
+
+#ifdef SR_ES8390
+      JsonObject es8390 = top.createNestedObject("ES8390");
+      es8390["pgaL"] = es8390Cfg.pgaL;
+      es8390["pgaR"] = es8390Cfg.pgaR;
+#endif
     }
 
 
@@ -2118,6 +2146,17 @@ class AudioReactive : public Usermod {
       configComplete &= getJsonValue(top["sync"]["port"], audioSyncPort);
       configComplete &= getJsonValue(top["sync"]["mode"], audioSyncEnabled);
 
+#ifdef SR_ES8390
+      configComplete &= getJsonValue(top["ES8390"]["pgaL"], es8390Cfg.pgaL);
+      configComplete &= getJsonValue(top["ES8390"]["pgaR"], es8390Cfg.pgaR);
+
+      if (initDone && dmType == 7 && audioSource) {
+        ES8390Source* es8390src = static_cast<ES8390Source*>(audioSource);
+        es8390src->setPgaGain(0, es8390Cfg.pgaL);
+        es8390src->setPgaGain(1, es8390Cfg.pgaR);
+      }
+#endif
+
       if (initDone) {
         // add/remove custom/audioreactive palettes
         if ((oldAddPalettes && !addPalettes) || (oldAddPalettes && !enabled)) removeAudioPalettes();
@@ -2153,6 +2192,9 @@ class AudioReactive : public Usermod {
       uiScript.print(F("addOption(dd,'Generic PDM',5);"));
     #endif
     uiScript.print(F("addOption(dd,'ES8388',6);"));
+#ifdef SR_ES8390
+      uiScript.print(F("addOption(dd,'ES8390',7);"));
+#endif
       uiScript.print(F("addOption(dd,'None - network receive only',"));
       uiScript.print(SR_DMTYPE_NETWORK_ONLY);
       uiScript.print(F(");"));
@@ -2175,6 +2217,40 @@ class AudioReactive : public Usermod {
       uiScript.print(F("addOption(dd,'Linear (Amplitude)',2);"));
       uiScript.print(F("addOption(dd,'Square Root (Energy)',3);"));
       uiScript.print(F("addOption(dd,'Logarithmic (Loudness)',1);"));
+
+#ifdef SR_ES8390
+      // ES8390 config UI (dropdowns, option values = raw register bytes)
+      // PGA (0x72/0x73): high nibble 0111, low nibble gain code (skip illegal codes 4, 5, F)
+      uiScript.print(F("dd=addDropdown(ux,'ES8390:pgaL');"));
+      uiScript.print(F("addOption(dd,'0 dB',0x70);"));
+      uiScript.print(F("addOption(dd,'3.5 dB',0x71);"));
+      uiScript.print(F("addOption(dd,'6.5 dB',0x72);"));
+      uiScript.print(F("addOption(dd,'9.5 dB',0x73);"));
+      uiScript.print(F("addOption(dd,'12.5 dB',0x76);"));
+      uiScript.print(F("addOption(dd,'15.5 dB',0x77);"));
+      uiScript.print(F("addOption(dd,'18.5 dB',0x78);"));
+      uiScript.print(F("addOption(dd,'21.5 dB',0x79);"));
+      uiScript.print(F("addOption(dd,'24.5 dB',0x7A);"));
+      uiScript.print(F("addOption(dd,'27.5 dB',0x7B);"));
+      uiScript.print(F("addOption(dd,'30.5 dB',0x7C);"));
+      uiScript.print(F("addOption(dd,'33.5 dB',0x7D);"));
+      uiScript.print(F("addOption(dd,'36.5 dB',0x7E);"));
+      uiScript.print(F("dd=addDropdown(ux,'ES8390:pgaR');"));
+      uiScript.print(F("addOption(dd,'0 dB',0x70);"));
+      uiScript.print(F("addOption(dd,'3.5 dB',0x71);"));
+      uiScript.print(F("addOption(dd,'6.5 dB',0x72);"));
+      uiScript.print(F("addOption(dd,'9.5 dB',0x73);"));
+      uiScript.print(F("addOption(dd,'12.5 dB',0x76);"));
+      uiScript.print(F("addOption(dd,'15.5 dB',0x77);"));
+      uiScript.print(F("addOption(dd,'18.5 dB',0x78);"));
+      uiScript.print(F("addOption(dd,'21.5 dB',0x79);"));
+      uiScript.print(F("addOption(dd,'24.5 dB',0x7A);"));
+      uiScript.print(F("addOption(dd,'27.5 dB',0x7B);"));
+      uiScript.print(F("addOption(dd,'30.5 dB',0x7C);"));
+      uiScript.print(F("addOption(dd,'33.5 dB',0x7D);"));
+      uiScript.print(F("addOption(dd,'36.5 dB',0x7E);"));
+#endif
+
 #endif
 
       uiScript.print(F("dd=addDropdown(ux,'sync:mode');"));
